@@ -1,0 +1,475 @@
+import { create } from 'zustand'
+import type {
+  AppState,
+  AppSettings,
+  SkinConfig,
+  InputState,
+  Candidate,
+  HistoryEntry,
+  AppPage,
+  QuickCommand,
+} from '../types'
+import { recordSelection } from '../services/pinyin'
+
+interface AppStore extends AppState {
+  // Page navigation
+  setPage: (page: AppPage) => void
+
+  // Skin management
+  setActiveSkin: (skinId: string) => void
+  setSkins: (skins: SkinConfig[]) => void
+  updateSkin: (skinId: string, config: Partial<SkinConfig>) => void
+  addSkin: (skin: SkinConfig) => void
+  removeSkin: (skinId: string) => void
+
+  // Input state
+  setComposing: (text: string) => void
+  setCommitted: (text: string) => void
+  setCandidates: (candidates: Candidate[]) => void
+  setHighlightedIndex: (index: number) => void
+  setVisible: (visible: boolean) => void
+  toggleVisible: () => void
+  setContext: (context: string) => void
+  setCommandMode: (on: boolean) => void
+  commitText: (candidate: Candidate) => void
+
+  // Regret mode
+  regret: () => void
+  canRegret: () => boolean
+  clearHistory: () => void
+  confirmRegret: (candidate: Candidate) => void
+  cancelRegret: () => void
+  getRegrettingEntry: () => HistoryEntry | null
+
+  // Quick commands
+  setCommands: (commands: QuickCommand[]) => void
+  addCommand: (cmd: QuickCommand) => void
+  updateCommand: (id: string, cmd: Partial<QuickCommand>) => void
+  removeCommand: (id: string) => void
+  toggleCommand: (id: string) => void
+
+  // Settings
+  updateSettings: (settings: Partial<AppSettings>) => void
+  loadSettings: () => Promise<void>
+  saveSettings: () => Promise<void>
+}
+
+const initialInputState: InputState = {
+  composing: '',
+  committed: '',
+  candidates: [],
+  highlightedIndex: 0,
+  isVisible: false,
+  mode: 'transient',
+  history: [],
+  isRegretMode: false,
+  context: '',
+  isCommandMode: false,
+}
+
+const defaultSettings: AppSettings = {
+  autoHideDelay: 3000,
+  defaultSkinId: 'ghost',
+  launchOnStartup: false,
+  showSkinBadge: true,
+}
+
+// Holds the popped entry during regret mode (not in reactive state)
+let _regrettingEntry: HistoryEntry | null = null
+
+export const useAppStore = create<AppStore>((set, get) => ({
+  currentPage: 'input',
+  activeSkinId: 'ghost',
+  skins: [],
+  commands: [],
+  inputState: { ...initialInputState },
+  settings: { ...defaultSettings },
+
+  setPage: (page) => set({ currentPage: page }),
+
+  setActiveSkin: (skinId) => set({ activeSkinId: skinId }),
+
+  setSkins: (skins) => set({ skins }),
+
+  updateSkin: (skinId, config) =>
+    set((state) => ({
+      skins: state.skins.map((s) =>
+        s.id === skinId ? { ...s, ...config } : s,
+      ),
+    })),
+
+  addSkin: (skin) =>
+    set((state) => ({
+      skins: [...state.skins, skin],
+    })),
+
+  removeSkin: (skinId) =>
+    set((state) => ({
+      skins: state.skins.filter((s) => s.id !== skinId),
+      activeSkinId:
+        state.activeSkinId === skinId
+          ? state.skins[0]?.id ?? 'ghost'
+          : state.activeSkinId,
+    })),
+
+  setComposing: (composing) =>
+    set((state) => ({ inputState: { ...state.inputState, composing } })),
+
+  setCommitted: (committed) =>
+    set((state) => ({ inputState: { ...state.inputState, committed } })),
+
+  setCandidates: (candidates) =>
+    set((state) => ({
+      inputState: { ...state.inputState, candidates, highlightedIndex: 0 },
+    })),
+
+  setHighlightedIndex: (highlightedIndex) =>
+    set((state) => ({ inputState: { ...state.inputState, highlightedIndex } })),
+
+  setVisible: (isVisible) =>
+    set((state) => {
+      if (isVisible) {
+        // Auto-enter regret mode if conditions are met
+        const history = state.inputState.history
+        if (history.length > 0) {
+          const lastEntry = history[history.length - 1]
+          if (Date.now() - lastEntry.timestamp <= 2000) {
+            // Edge case: quick command (starts with /) — just backspace, no candidates
+            if (lastEntry.pinyin.startsWith('/')) {
+              if (window.imeAPI) {
+                window.imeAPI.sendBackspace(lastEntry.text.length)
+              }
+              const newHistory = [...history]
+              newHistory.pop()
+              _regrettingEntry = null
+              return {
+                inputState: {
+                  ...state.inputState,
+                  isVisible: false,
+                  composing: '',
+                  candidates: [],
+                  highlightedIndex: 0,
+                  isRegretMode: false,
+                  context: '',
+                  history: newHistory,
+                },
+              }
+            }
+
+            // Edge case: single candidate — just backspace, no candidates
+            if (lastEntry.candidates.length <= 1) {
+              if (window.imeAPI) {
+                window.imeAPI.sendBackspace(lastEntry.text.length)
+              }
+              const newHistory = [...history]
+              newHistory.pop()
+              _regrettingEntry = null
+              return {
+                inputState: {
+                  ...state.inputState,
+                  isVisible: false,
+                  composing: '',
+                  candidates: [],
+                  highlightedIndex: 0,
+                  isRegretMode: false,
+                  context: '',
+                  history: newHistory,
+                },
+              }
+            }
+
+            // Normal regret: delete old text, show candidates, highlight next
+            if (window.imeAPI) {
+              window.imeAPI.sendBackspace(lastEntry.text.length)
+            }
+            const newHistory = [...history]
+            newHistory.pop()
+            _regrettingEntry = lastEntry
+            return {
+              inputState: {
+                ...state.inputState,
+                isVisible: true,
+                composing: lastEntry.pinyin,
+                candidates: lastEntry.candidates,
+                highlightedIndex:
+                  (lastEntry.selectedIndex + 1) % Math.max(lastEntry.candidates.length, 1),
+                history: newHistory,
+                isRegretMode: true,
+                context: '',
+              },
+            }
+          }
+        }
+        // Normal show: fresh session
+        _regrettingEntry = null
+        return {
+          inputState: {
+            ...state.inputState,
+            isVisible: true,
+            composing: '',
+            candidates: [],
+            highlightedIndex: 0,
+            isRegretMode: false,
+            context: '',
+          },
+        }
+      }
+      // Hide: clear everything
+      return {
+        inputState: {
+          ...state.inputState,
+          isVisible: false,
+          composing: '',
+          candidates: [],
+          highlightedIndex: 0,
+          isRegretMode: false,
+          context: '',
+        },
+      }
+    }),
+
+  toggleVisible: () =>
+    set((state) => ({
+      inputState: {
+        ...state.inputState,
+        isVisible: !state.inputState.isVisible,
+        ...(state.inputState.isVisible
+          ? { composing: '', candidates: [], isRegretMode: false, context: '' }
+          : {}),
+      },
+    })),
+
+  setContext: (context) =>
+    set((state) => ({ inputState: { ...state.inputState, context } })),
+
+  setCommandMode: (on) =>
+    set((state) => ({ inputState: { ...state.inputState, isCommandMode: on } })),
+
+  commitText: (candidate) => {
+    const state = get()
+    const entry: HistoryEntry = {
+      pinyin: state.inputState.composing || (_regrettingEntry?.pinyin ?? ''),
+      text: candidate.text,
+      candidates: [...state.inputState.candidates],
+      selectedIndex: state.inputState.highlightedIndex,
+      timestamp: Date.now(),
+      processName: '',
+    }
+
+    // Try to get active app name for regret mode context
+    if (window.imeAPI) {
+      window.imeAPI.getActiveAppName().then((name) => {
+        entry.processName = name
+      })
+      window.imeAPI.recordInput(candidate.text)
+    }
+
+    recordSelection(candidate.text, candidate.text.length === 1)
+
+    set((s) => ({
+      inputState: {
+        ...s.inputState,
+        committed: s.inputState.committed + candidate.text,
+        composing: '',
+        candidates: [],
+        highlightedIndex: 0,
+        isRegretMode: false,
+        history: [...s.inputState.history, entry].slice(-50),
+      },
+    }))
+  },
+
+  regret: () => {
+    const state = get()
+    const history = [...state.inputState.history]
+    if (history.length === 0) return
+
+    const lastEntry = history.pop()!
+
+    // Only allow regret within 2 seconds
+    if (Date.now() - lastEntry.timestamp > 2000) {
+      set((s) => ({
+        inputState: { ...s.inputState, history, isRegretMode: false },
+      }))
+      return
+    }
+
+    // Edge case: quick command or single candidate — just delete, no candidates
+    if (lastEntry.pinyin.startsWith('/') || lastEntry.candidates.length <= 1) {
+      if (window.imeAPI) {
+        window.imeAPI.sendBackspace(lastEntry.text.length)
+      }
+      set((s) => ({
+        inputState: { ...s.inputState, history, isRegretMode: false },
+      }))
+      _regrettingEntry = null
+      return
+    }
+
+    // Delete old text via backspace
+    if (window.imeAPI) {
+      window.imeAPI.sendBackspace(lastEntry.text.length)
+    }
+
+    // Remove committed text from session tracker
+    const committed = state.inputState.committed
+    const newCommitted = committed.slice(
+      0,
+      committed.length - lastEntry.text.length,
+    )
+
+    _regrettingEntry = lastEntry
+
+    set((s) => ({
+      inputState: {
+        ...s.inputState,
+        committed: newCommitted,
+        candidates: lastEntry.candidates,
+        highlightedIndex:
+          (lastEntry.selectedIndex + 1) % Math.max(lastEntry.candidates.length, 1),
+        history,
+        isRegretMode: true,
+      },
+    }))
+  },
+
+  canRegret: () => {
+    const state = get()
+    if (state.inputState.history.length === 0) return false
+    const lastEntry =
+      state.inputState.history[state.inputState.history.length - 1]
+    return Date.now() - lastEntry.timestamp <= 2000
+  },
+
+  confirmRegret: (candidate) => {
+    const entry = _regrettingEntry
+    const state = get()
+
+    // Create updated history entry with new selection
+    const newEntry: HistoryEntry = {
+      pinyin: entry?.pinyin ?? state.inputState.composing,
+      text: candidate.text,
+      candidates: [...state.inputState.candidates],
+      selectedIndex: state.inputState.highlightedIndex,
+      timestamp: Date.now(),
+      processName: entry?.processName ?? '',
+    }
+
+    if (window.imeAPI) {
+      window.imeAPI.recordInput(candidate.text)
+    }
+
+    recordSelection(candidate.text, candidate.text.length === 1)
+
+    _regrettingEntry = null
+
+    set((s) => ({
+      inputState: {
+        ...s.inputState,
+        committed: s.inputState.committed + candidate.text,
+        composing: '',
+        candidates: [],
+        highlightedIndex: 0,
+        isRegretMode: false,
+        history: [...s.inputState.history, newEntry].slice(-50),
+      },
+    }))
+  },
+
+  cancelRegret: () => {
+    const entry = _regrettingEntry
+    _regrettingEntry = null
+
+    if (entry) {
+      // Re-inject original text
+      if (window.imeAPI) {
+        window.imeAPI.injectText(entry.text)
+      }
+      // Restore history entry
+      set((s) => ({
+        inputState: {
+          ...s.inputState,
+          committed: s.inputState.committed + entry.text,
+          composing: '',
+          candidates: [],
+          highlightedIndex: 0,
+          isRegretMode: false,
+          history: [...s.inputState.history, entry].slice(-50),
+        },
+      }))
+    } else {
+      set((s) => ({
+        inputState: {
+          ...s.inputState,
+          composing: '',
+          candidates: [],
+          highlightedIndex: 0,
+          isRegretMode: false,
+        },
+      }))
+    }
+  },
+
+  getRegrettingEntry: () => _regrettingEntry,
+
+  clearHistory: () => {
+    _regrettingEntry = null
+    set((state) => ({
+      inputState: { ...state.inputState, history: [], isRegretMode: false },
+    }))
+  },
+
+  setCommands: (commands) => set({ commands }),
+
+  addCommand: (cmd) =>
+    set((state) => ({
+      commands: [...state.commands, cmd],
+    })),
+
+  updateCommand: (id, partial) =>
+    set((state) => ({
+      commands: state.commands.map((c) =>
+        c.id === id ? { ...c, ...partial } : c,
+      ),
+    })),
+
+  removeCommand: (id) =>
+    set((state) => ({
+      commands: state.commands.filter((c) => c.id !== id),
+    })),
+
+  toggleCommand: (id) =>
+    set((state) => ({
+      commands: state.commands.map((c) =>
+        c.id === id ? { ...c, enabled: !c.enabled } : c,
+      ),
+    })),
+
+  // Settings
+  updateSettings: (partial) =>
+    set((state) => ({
+      settings: { ...state.settings, ...partial },
+    })),
+
+  loadSettings: async () => {
+    if (!window.imeAPI) return
+    try {
+      const raw = await window.imeAPI.getSettings()
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        set((state) => ({
+          settings: { ...state.settings, ...parsed },
+          activeSkinId: parsed.defaultSkinId || state.activeSkinId,
+        }))
+      }
+    } catch {
+      // Use defaults
+    }
+  },
+
+  saveSettings: async () => {
+    if (!window.imeAPI) return
+    const { settings } = get()
+    await window.imeAPI.saveSettings(JSON.stringify(settings))
+  },
+}))

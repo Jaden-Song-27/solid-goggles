@@ -1,0 +1,84 @@
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+body {
+  background: transparent !important;
+}
+
+input, textarea, [data-selectable] {
+  user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+:focus {
+  outline: none;
+}
+
+/* ============ IME Overlay Animation States ============ */
+
+/* Breathing warning animation: 0.8s before auto-hide */
+.ime-overlay.ime-breathing {
+  animation: ime-breathing 0.8s ease-in-out infinite !important;
+}
+
+@keyframes ime-breathing {
+  0%   { opacity: 1; }
+  25%  { opacity: 0.65; }
+  50%  { opacity: 1; }
+  75%  { opacity: 0.65; }
+  100% { opacity: 1; }
+}
+
+/* Quick fade out on commit / auto-hide */
+.ime-overlay.ime-fading-out {
+  animation: ime-fade-out 0.1s ease-out forwards !important;
+}
+
+@keyframes ime-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Skin debug badge */
+.ime-skin-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 9px;
+  opacity: 0.35;
+  color: var(--ime-pinyin-color, #fff);
+  pointer-events: none;
+}
