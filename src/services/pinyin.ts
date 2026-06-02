@@ -5,6 +5,27 @@ import { useAppStore } from '../store'
 import { isCommandTrigger, executeCommand } from './commands'
 import { safeEvaluate, isMathExpression } from './safe-math'
 
+// ---- Performance Optimizations ----
+
+/** Pre-built index: first letter → sorted syllables (built once at init) */
+const acronymIndex: Record<string, string[]> = {}
+function buildAcronymIndex() {
+  for (const syl of PINYIN_SYLLABLES) {
+    const key = syl[0]
+    if (!acronymIndex[key]) acronymIndex[key] = []
+    acronymIndex[key].push(syl)
+  }
+  // Sort each bucket by length (shorter = more common)
+  for (const key of Object.keys(acronymIndex)) {
+    acronymIndex[key].sort((a, b) => a.length - b.length)
+  }
+}
+buildAcronymIndex()
+
+/** Simple LRU cache for getCandidates */
+const candidateCache = new Map<string, Candidate[]>()
+const CACHE_MAX = 50
+
 // ---- User Frequency Cache ----
 
 let _userFrequency: Record<string, number> = {}
@@ -30,21 +51,44 @@ async function refreshFrequencyInternal(): Promise<void> {
 /** Reload frequency data from disk (call after committing text to keep data fresh). */
 export function refreshFrequency(): void {
   refreshFrequencyInternal()
+  candidateCache.clear()
+}
+
+// Cached history-based boosts (rebuilt when history changes)
+let _historyBoostCache: Map<string, number> = new Map()
+let _historyBoostVersion = -1
+
+function getHistoryVersion(): number {
+  return useAppStore.getState().inputState.history.length
+}
+
+function getHistoryBoosts(): Map<string, number> {
+  const version = getHistoryVersion()
+  if (version === _historyBoostVersion) return _historyBoostCache
+
+  const boosts = new Map<string, number>()
+  const history = useAppStore.getState().inputState.history
+  for (const entry of history) {
+    boosts.set(entry.text, (boosts.get(entry.text) || 0) + 15)
+    // Substring matches for multi-char words
+    if (entry.text.length > 1) {
+      for (let i = 0; i < entry.text.length; i++) {
+        const sub = entry.text[i]
+        boosts.set(sub, (boosts.get(sub) || 0) + 2)
+      }
+    }
+  }
+  _historyBoostCache = boosts
+  _historyBoostVersion = version
+  return boosts
 }
 
 function getUserFreqBoost(text: string): number {
   let boost = 0
-  // Check stored frequency
   if (_userFrequency[text]) {
     boost += _userFrequency[text] * 5
   }
-  // Check current session history
-  const history = useAppStore.getState().inputState.history
-  for (const entry of history) {
-    if (entry.text === text) boost += 15
-    // Check if this text is part of a multi-char selection (user-created word)
-    if (entry.text.includes(text) && entry.text.length > text.length) boost += 2
-  }
+  boost += getHistoryBoosts().get(text) || 0
   return boost
 }
 
@@ -100,24 +144,24 @@ export function segmentPinyin(input: string): string[][] {
   const results: string[][] = []
   const maxLen = 6 // longest pinyin syllable is 6 chars (zhuang, chuang, shuang)
 
+  let found = 0
   function backtrack(pos: number, path: string[]) {
+    if (found >= 10) return // Limit to first 10 segmentations
     if (pos >= input.length) {
       results.push([...path])
+      found++
       return
     }
-
-    // Try to match from current position
     for (let len = Math.min(maxLen, input.length - pos); len >= 1; len--) {
       const candidate = input.substring(pos, pos + len)
       if (PINYIN_SYLLABLES.has(candidate)) {
         backtrack(pos + len, [...path, candidate])
+        if (found >= 10) return
       }
     }
   }
 
   backtrack(0, [])
-  // If no valid segmentation found (e.g., pure acronym input like "nh"),
-  // return empty so getCandidates falls back to acronym expansion.
   return results
 }
 
@@ -127,30 +171,25 @@ export function segmentPinyin(input: string): string[][] {
  */
 function expandAcronym(input: string): string[][] {
   const result: string[][] = []
+  const len = input.length
 
   function backtrack(pos: number, current: string[]) {
-    if (pos >= input.length) {
+    if (pos >= len) {
       result.push([...current])
       return
     }
-
-    const ch = input[pos]
-    // Find all syllables starting with this character
-    const matches: string[] = []
-    for (const syl of PINYIN_SYLLABLES) {
-      if (syl.startsWith(ch)) matches.push(syl)
-    }
-    // Sort by frequency (shorter syllables are more common)
-    matches.sort((a, b) => a.length - b.length)
-
-    // Only take top 5 to avoid combinatorial explosion
-    for (const match of matches.slice(0, 5)) {
-      backtrack(pos + 1, [...current, match])
+    const matches = acronymIndex[input[pos]]
+    if (!matches) return
+    // Take top 5 to avoid combinatorial explosion
+    const limit = Math.min(matches.length, 5)
+    for (let i = 0; i < limit; i++) {
+      backtrack(pos + 1, [...current, matches[i]])
+      if (result.length >= 20) return // Early exit
     }
   }
 
   backtrack(0, [])
-  return result.slice(0, 20)
+  return result
 }
 
 /**
@@ -163,7 +202,12 @@ function expandAcronym(input: string): string[][] {
  * 4. If no results, try acronym expansion
  */
 export function getCandidates(input: string): Candidate[] {
-  const normalized = input.toLowerCase().trim().replace(/\s+/g, '')
+  // Use cache for instant response on repeated prefixes
+  const cacheKey = input.toLowerCase().trim()
+  const cached = candidateCache.get(cacheKey)
+  if (cached) return cached
+
+  const normalized = cacheKey.replace(/\s+/g, '')
   if (!normalized) return []
 
   // ---- Command mode (starts with '/') ----
@@ -193,9 +237,21 @@ export function getCandidates(input: string): Candidate[] {
   }
 
   const pinyinResults = combineCandidates(bestSegments)
+  const results = [...mathCandidates, ...pinyinResults]
 
-  // Prepend math result if available
-  return [...mathCandidates, ...pinyinResults]
+  // Cache result (LRU eviction)
+  if (candidateCache.size >= CACHE_MAX) {
+    const firstKey = candidateCache.keys().next().value
+    if (firstKey !== undefined) candidateCache.delete(firstKey)
+  }
+  candidateCache.set(cacheKey, results)
+
+  return results
+}
+
+/** Clear the candidate cache (call when frequency data changes) */
+export function clearCandidateCache(): void {
+  candidateCache.clear()
 }
 
 /** Check for math expression and return result as a candidate, or null. */

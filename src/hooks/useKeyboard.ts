@@ -2,6 +2,16 @@ import { useEffect } from 'react'
 import { useAppStore } from '../store'
 import { getCandidates } from '../services/pinyin'
 
+// Batch candidate updates with rAF to prevent UI blocking on fast typing
+let _rafId: number | null = null
+function scheduleCandidates(setter: () => void) {
+  if (_rafId !== null) cancelAnimationFrame(_rafId)
+  _rafId = requestAnimationFrame(() => {
+    _rafId = null
+    setter()
+  })
+}
+
 /**
  * Keyboard handler for the IME overlay.
  *
@@ -96,20 +106,19 @@ export function useKeyboard() {
       }
 
       // ---- Regret mode: typing exits regret and starts new session ----
-      if (isRegretMode && /^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+      if (isRegretMode && /^[a-zA-Z/]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        setVisible(true) // trigger clean session via setVisible
+        setVisible(true)
         setComposing(e.key.toLowerCase())
         return
       }
 
-      // ---- Normal mode: Letters (a-z) ----
-      if (!isRegretMode && /^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+      // ---- Normal mode: Letters (a-z) and / for commands ----
+      if (!isRegretMode && /^[a-zA-Z/]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
         const updated = composing + e.key.toLowerCase()
         setComposing(updated)
-        const newCandidates = getCandidates(updated)
-        setCandidates(newCandidates)
+        setCandidates(getCandidates(updated))
         return
       }
 
@@ -118,7 +127,7 @@ export function useKeyboard() {
         e.preventDefault()
         const updated = composing + e.key
         setComposing(updated)
-        setCandidates(getCandidates(updated))
+        scheduleCandidates(() => setCandidates(getCandidates(updated)))
         return
       }
 
@@ -166,7 +175,7 @@ export function useKeyboard() {
           const updated = composing.slice(0, -1)
           setComposing(updated)
           if (updated.length > 0) {
-            setCandidates(getCandidates(updated))
+            scheduleCandidates(() => setCandidates(getCandidates(updated)))
           } else {
             setCandidates([])
           }

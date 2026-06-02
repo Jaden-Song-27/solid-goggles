@@ -7,9 +7,9 @@ const DIST_ELECTRON = join(__dirname)
 const DIST = join(DIST_ELECTRON, '../dist')
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
-/** Default window dimensions */
-const WIN_W = 680
-const WIN_H = 72
+/** Default window dimensions — 2x larger for visibility */
+const WIN_W = 1360
+const WIN_H = 144
 
 export function createMainWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
@@ -30,6 +30,9 @@ export function createMainWindow(): BrowserWindow {
       sandbox: false,
     },
   })
+
+  // Force highest z-order to appear above WPS/WeChat/etc
+  mainWindow.setAlwaysOnTop(true, 'screen-saver')
 
   if (VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL)

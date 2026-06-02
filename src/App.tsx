@@ -4,7 +4,8 @@ import { useImeBridge, useSkin, useAutoHide, useKeyboard } from './hooks'
 import { validateSkinConfig } from './skins/engine'
 import { builtInSkins } from './skins'
 import { initFrequency } from './services/pinyin'
-import type { SkinConfig } from './types'
+import { loadRecentTexts, getRecentCandidates } from './store'
+import type { SkinConfig, Candidate } from './types'
 
 const SkinEditor = lazy(() => import('./components/SkinEditor'))
 const SettingsPage = lazy(() => import('./components/SettingsPage'))
@@ -16,10 +17,11 @@ export default function App() {
 
   const loadSettings = useAppStore((s) => s.loadSettings)
 
-  // Initialize word frequency data and settings on startup
+  // Initialize word frequency data, recent texts, and settings on startup
   useEffect(() => {
     initFrequency()
     loadSettings()
+    loadRecentTexts()
   }, [])
 
   useImeBridge()
@@ -45,9 +47,9 @@ export default function App() {
   useEffect(() => {
     if (!window.imeAPI) return
     if (currentPage === 'input') {
-      window.imeAPI.resizeWindow(680, 72)
+      window.imeAPI.resizeWindow(1360, 144)
     } else {
-      window.imeAPI.resizeWindow(800, 550)
+      window.imeAPI.resizeWindow(1200, 800)
     }
   }, [currentPage])
 
@@ -174,9 +176,34 @@ export default function App() {
           <span className="ime-pinyin-text">
             {isRegretMode
               ? (composing || '(后悔)')
-              : (composing || '开始输入...')}
+              : (composing || '')}
+            {!isRegretMode && composing.length === 0 && (
+              <span className="ime-recent-label">最近使用</span>
+            )}
             <span className="ime-composing-cursor" />
           </span>
+
+          {/* Recent texts shown when no typing */}
+          {!isRegretMode && composing.length === 0 && candidates.length === 0 && (
+            <div className="ime-candidates">
+              {getRecentCandidates().slice(0, 10).map((c, i) => (
+                <span
+                  key={c.id}
+                  className="ime-candidate"
+                  onClick={() => {
+                    useAppStore.getState().selectCandidate(c)
+                  }}
+                >
+                  {c.text}
+                </span>
+              ))}
+              {getRecentCandidates().length === 0 && (
+                <span style={{ color: 'var(--ime-pinyin-color, #888)', opacity: 0.5, fontSize: 'inherit' }}>
+                  输入拼音开始...
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Divider */}
           {(composing.length > 0 || candidates.length > 0) && (

@@ -48,6 +48,10 @@ export interface ImeAPI {
   onBlur: (callback: () => void) => () => void
   onHideRequest: (callback: () => void) => () => void
 
+  // Recent texts memory
+  getRecentTexts: () => Promise<string>
+  saveRecentText: (text: string) => void
+
   // Tray refresh
   refreshTray: () => void
 }
@@ -163,6 +167,14 @@ const api: ImeAPI = {
     const handler = () => callback()
     ipcRenderer.on('ime:hide-request', handler)
     return () => ipcRenderer.removeListener('ime:hide-request', handler)
+  },
+
+  async getRecentTexts() {
+    return ipcRenderer.invoke('recent:get')
+  },
+
+  saveRecentText(text: string) {
+    ipcRenderer.send('recent:save', text)
   },
 
   refreshTray() {

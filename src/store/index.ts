@@ -57,8 +57,7 @@ interface AppStore extends AppState {
   saveSettings: () => Promise<void>
 }
 
-const FADE_OUT_MS = 100
-const INJECT_DELAY_MS = 30
+const FOCUS_WAIT_MS = 80 // Time for target app to regain focus after hiding
 
 const initialInputState: InputState = {
   composing: '',
@@ -82,6 +81,41 @@ const defaultSettings: AppSettings = {
 
 // Holds the popped entry during regret mode (not in reactive state)
 let _regrettingEntry: HistoryEntry | null = null
+
+// Recent texts memory (loaded once, updated on commit)
+let _recentTexts: Candidate[] = []
+
+/** Load recent texts from disk and return as candidates */
+export async function loadRecentTexts(): Promise<Candidate[]> {
+  if (!window.imeAPI) return []
+  try {
+    const raw = await window.imeAPI.getRecentTexts()
+    const texts: string[] = JSON.parse(raw || '[]')
+    _recentTexts = texts.reverse().map((t, i) => ({
+      id: `recent-${i}`,
+      text: t,
+      frequency: 900 - i * 10,
+    }))
+  } catch {
+    _recentTexts = []
+  }
+  return _recentTexts
+}
+
+/** Save a committed text to recent memory */
+function saveRecentText(text: string) {
+  if (!window.imeAPI || text.length === 0) return
+  window.imeAPI.saveRecentText(text)
+  // Update in-memory cache
+  _recentTexts = _recentTexts.filter((c) => c.text !== text)
+  _recentTexts.unshift({ id: `recent-0`, text, frequency: 900 })
+  if (_recentTexts.length > 20) _recentTexts = _recentTexts.slice(0, 20)
+}
+
+/** Get cached recent texts (no async) */
+export function getRecentCandidates(): Candidate[] {
+  return _recentTexts
+}
 
 export const useAppStore = create<AppStore>((set, get) => ({
   currentPage: 'input',
@@ -277,16 +311,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     }
 
-    // Apply fade-out CSS animation
-    const el = document.querySelector('.ime-overlay')
-    if (el) {
-      el.classList.add('ime-fading-out')
+    // Hide the overlay FIRST so the target app regains focus
+    if (window.imeAPI) {
+      window.imeAPI.hideWindow()
     }
-
-    // Wait for fade-out animation to complete
-    await new Promise((resolve) => setTimeout(resolve, FADE_OUT_MS))
-
-    // Hide overlay
     set((s) => ({
       inputState: {
         ...s.inputState,
@@ -299,10 +327,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     }))
 
-    // Brief delay to ensure window is visually empty before text injection
-    await new Promise((resolve) => setTimeout(resolve, INJECT_DELAY_MS))
+    // Wait for target app to regain focus
+    await new Promise((resolve) => setTimeout(resolve, FOCUS_WAIT_MS))
 
-    // Inject text into the active application
+    // Now inject into the focused app
     if (window.imeAPI) {
       try {
         await window.imeAPI.injectText(resolvedText)
@@ -339,6 +367,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     recordSelection(candidate.text, candidate.text.length === 1)
     refreshFrequency()
+    saveRecentText(candidate.text)
 
     set((s) => ({
       inputState: {
@@ -435,6 +464,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     recordSelection(candidate.text, candidate.text.length === 1)
     refreshFrequency()
+    saveRecentText(candidate.text)
 
     _regrettingEntry = null
 

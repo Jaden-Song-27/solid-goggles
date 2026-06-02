@@ -258,6 +258,40 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // ---- Recent texts memory ----
+  ipcMain.handle('recent:get', async () => {
+    try {
+      const filePath = join(getUserDataPath(), 'recent.json')
+      if (existsSync(filePath)) {
+        return readFileSync(filePath, 'utf-8')
+      }
+      return JSON.stringify([])
+    } catch (err) {
+      console.error('[SmartIME] Error loading recent texts:', err)
+      return JSON.stringify([])
+    }
+  })
+
+  ipcMain.on('recent:save', (_event, text: string) => {
+    try {
+      const filePath = join(getUserDataPath(), 'recent.json')
+      let recent: string[] = []
+      if (existsSync(filePath)) {
+        try {
+          recent = JSON.parse(readFileSync(filePath, 'utf-8'))
+        } catch { recent = [] }
+      }
+      // Deduplicate and keep last 20
+      recent = recent.filter((t) => t !== text)
+      recent.push(text)
+      if (recent.length > 20) recent = recent.slice(-20)
+      ensureDir(getUserDataPath())
+      writeFileSync(filePath, JSON.stringify(recent), 'utf-8')
+    } catch (err) {
+      console.error('[SmartIME] Error saving recent text:', err)
+    }
+  })
+
   // ---- Tray: refresh (call when custom skins change) ----
   ipcMain.on('tray:refresh', () => refreshTrayMenu())
 }

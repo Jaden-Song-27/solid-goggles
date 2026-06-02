@@ -70,11 +70,27 @@ function registerGlobalShortcuts() {
     }
   }
 
-  // Register Alt+= as the toggle shortcut
-  try {
-    globalShortcut.register('Alt+=', onToggle)
-  } catch {
-    console.warn('[SmartIME] Failed to register global shortcut. Use tray menu to toggle.')
+  // Try multiple shortcuts in order. WPS/WeChat/etc may steal Alt+=,
+  // so we fall back to combinations less likely to conflict.
+  const shortcuts = [
+    'Alt+Shift+Z',
+    'Alt+=',
+  ]
+
+  let registered = false
+  for (const key of shortcuts) {
+    try {
+      globalShortcut.register(key, onToggle)
+      console.log('[SmartIME] Registered shortcut:', key)
+      registered = true
+      break
+    } catch {
+      // Try next
+    }
+  }
+
+  if (!registered) {
+    console.warn('[SmartIME] Failed to register any global shortcut. Use tray menu to toggle.')
   }
 }
 

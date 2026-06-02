@@ -222,16 +222,30 @@ let win32Loaded: boolean | null = null
  */
 export function injectText(text: string): boolean {
   if (isWindows) {
-    if (win32Loaded === null) win32Loaded = loadWin32()
-    if (win32Loaded) return injectWin32(text)
+    if (win32Loaded === null) {
+      win32Loaded = loadWin32()
+      if (win32Loaded) {
+        console.log('[SmartIME] koffi SendInput loaded successfully')
+      } else {
+        console.log('[SmartIME] koffi failed, using PowerShell fallback')
+      }
+    }
+    if (win32Loaded) {
+      const ok = injectWin32(text)
+      if (ok) return true
+      console.log('[SmartIME] SendInput returned 0, trying fallback')
+    }
+    // Fallback: PowerShell SendKeys
     try {
       const escaped = escapeForSendKeys(text).replace(/'/g, "''")
       execSync(
-        `powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('${escaped}')"`,
-        { timeout: 2000 },
+        `powershell -NoProfile -command "$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('${escaped}')"`,
+        { timeout: 3000 },
       )
+      console.log('[SmartIME] PowerShell fallback succeeded')
       return true
-    } catch {
+    } catch (e) {
+      console.error('[SmartIME] All injection methods failed:', e)
       return false
     }
   }

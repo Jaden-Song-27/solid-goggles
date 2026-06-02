@@ -12,40 +12,40 @@ export const ghostSkin: SkinConfig = {
   description: '半透明灰黑背景，毛玻璃，缩放弹出，适合瞬态输入',
 
   window: {
-    background: 'rgba(32, 32, 36, 0.88)',
+    background: '#1a1a1a',
     borderRadius: 14,
     padding: 14,
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
     opacity: 1,
     backdropBlur: 16,
   },
 
   pinyin: {
-    fontSize: 18,
+    fontSize: 36,
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif',
-    color: 'rgba(255, 255, 255, 0.92)',
-    letterSpacing: 2,
-    dividerColor: 'rgba(255, 255, 255, 0.12)',
-    dividerWidth: 1,
+    color: '#ffffff',
+    letterSpacing: 4,
+    dividerColor: 'rgba(255, 255, 255, 0.25)',
+    dividerWidth: 2,
     dividerStyle: 'solid',
   },
 
   candidateContainer: {
     direction: 'horizontal',
-    gap: 6,
+    gap: 12,
     borderRadius: 8,
-    padding: '4px 10px',
-    fontSize: 16,
+    padding: '8px 20px',
+    fontSize: 32,
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif',
-    labelColor: 'rgba(255, 255, 255, 0.40)',
+    labelColor: 'rgba(255, 255, 255, 0.55)',
     states: {
       normal: {
         bg: 'transparent',
-        color: 'rgba(255, 255, 255, 0.85)',
+        color: '#ffffff',
       },
       hover: {
-        bg: 'rgba(255, 255, 255, 0.10)',
-        color: 'rgba(255, 255, 255, 0.95)',
+        bg: 'rgba(255, 255, 255, 0.12)',
+        color: '#ffffff',
       },
       active: {
         bg: '#6C5CE7',
@@ -59,17 +59,17 @@ export const ghostSkin: SkinConfig = {
     gap: 0,
     borderRadius: 6,
     padding: '4px 12px',
-    fontSize: 16,
+    fontSize: 32,
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif',
-    labelColor: 'rgba(255, 255, 255, 0.40)',
+    labelColor: 'rgba(255, 255, 255, 0.55)',
     states: {
       normal: {
         bg: 'transparent',
-        color: 'rgba(255, 255, 255, 0.85)',
+        color: '#ffffff',
       },
       hover: {
-        bg: 'rgba(255, 255, 255, 0.10)',
-        color: 'rgba(255, 255, 255, 0.95)',
+        bg: 'rgba(255, 255, 255, 0.12)',
+        color: '#ffffff',
       },
       active: {
         bg: '#6C5CE7',
