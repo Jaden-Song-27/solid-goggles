@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from '../store'
 import { getCandidates } from '../services/pinyin'
 
@@ -24,50 +24,10 @@ export function useKeyboard() {
   const setComposing = useAppStore((s) => s.setComposing)
   const setCandidates = useAppStore((s) => s.setCandidates)
   const setHighlightedIndex = useAppStore((s) => s.setHighlightedIndex)
-  const commitText = useAppStore((s) => s.commitText)
+  const selectCandidate = useAppStore((s) => s.selectCandidate)
   const setVisible = useAppStore((s) => s.setVisible)
   const regret = useAppStore((s) => s.regret)
-  const confirmRegret = useAppStore((s) => s.confirmRegret)
   const cancelRegret = useAppStore((s) => s.cancelRegret)
-
-  const injectAndHide = useCallback(async (text: string) => {
-    // Resolve /clip command: fetch actual clipboard content
-    let resolvedText = text
-    if (composing.startsWith('/clip') && text === '读取剪贴板中...') {
-      if (window.imeAPI) {
-        try {
-          const clipText = await window.imeAPI.readClipboard()
-          resolvedText = clipText || '(剪贴板为空)'
-        } catch {
-          resolvedText = '(剪贴板读取失败)'
-        }
-      }
-    }
-
-    // Apply fade-out CSS animation class (100ms keyframe in global.css)
-    const el = document.querySelector('.ime-overlay')
-    if (el) {
-      el.classList.add('ime-fading-out')
-    }
-
-    // Wait for fade-out animation to complete
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    // Hide the React overlay
-    setVisible(false)
-
-    // Brief delay to ensure the window is visually empty before text injection
-    await new Promise((resolve) => setTimeout(resolve, 30))
-
-    // Inject text into the active application
-    if (window.imeAPI) {
-      try {
-        await window.imeAPI.injectText(resolvedText)
-      } catch {
-        console.warn('[SmartIME] Text injection failed, text may be in clipboard')
-      }
-    }
-  }, [setVisible, composing])
 
   useEffect(() => {
     if (!isVisible) return
@@ -76,12 +36,7 @@ export function useKeyboard() {
       // ---- Ctrl+Z: Regret mode / continuous regret ----
       if (e.ctrlKey && e.key === 'z') {
         e.preventDefault()
-        if (isRegretMode) {
-          // Continuous regret: go back one more entry
-          regret()
-        } else {
-          regret()
-        }
+        regret()
         return
       }
 
@@ -105,8 +60,7 @@ export function useKeyboard() {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (index < candidates.length) {
-          confirmRegret(candidates[index])
-          injectAndHide(candidates[index].text)
+          selectCandidate(candidates[index])
         }
         return
       }
@@ -115,8 +69,7 @@ export function useKeyboard() {
       if (isRegretMode && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault()
         if (candidates.length > 0 && candidates[highlightedIndex]) {
-          confirmRegret(candidates[highlightedIndex])
-          injectAndHide(candidates[highlightedIndex].text)
+          selectCandidate(candidates[highlightedIndex])
         }
         return
       }
@@ -172,17 +125,20 @@ export function useKeyboard() {
       // ---- Normal mode: Space ----
       if (!isRegretMode && e.key === ' ' && composing.length > 0) {
         e.preventDefault()
-        // In command mode (/trans, /calc): append space for typing arguments
+        // Command mode: if we have results, select. Otherwise append space for args.
         if (composing.startsWith('/')) {
-          const updated = composing + ' '
-          setComposing(updated)
-          setCandidates(getCandidates(updated))
-          return
+          if (!composing.includes(' ') && candidates.length === 0) {
+            // No space yet and no results → type an argument
+            setComposing(composing + ' ')
+            return
+          }
+          if (candidates.length > 0 && candidates[highlightedIndex]) {
+            selectCandidate(candidates[highlightedIndex])
+            return
+          }
         }
         if (candidates.length > 0 && candidates[highlightedIndex]) {
-          const text = candidates[highlightedIndex].text
-          commitText(candidates[highlightedIndex])
-          injectAndHide(text)
+          selectCandidate(candidates[highlightedIndex])
         }
         return
       }
@@ -191,9 +147,14 @@ export function useKeyboard() {
       if (!isRegretMode && e.key === 'Enter') {
         e.preventDefault()
         if (candidates.length > 0 && candidates[highlightedIndex]) {
-          const text = candidates[highlightedIndex].text
-          commitText(candidates[highlightedIndex])
-          injectAndHide(text)
+          const first = candidates[0]
+          const isHint = first && first.text.includes('—')
+          if (composing.startsWith('/') && isHint) {
+            // Hint text → append space instead of injecting
+            setComposing(composing + ' ')
+            return
+          }
+          selectCandidate(candidates[highlightedIndex])
         }
         return
       }
@@ -218,9 +179,7 @@ export function useKeyboard() {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (index < candidates.length) {
-          const text = candidates[index].text
-          commitText(candidates[index])
-          injectAndHide(text)
+          selectCandidate(candidates[index])
         }
         return
       }
@@ -269,11 +228,9 @@ export function useKeyboard() {
     setComposing,
     setCandidates,
     setHighlightedIndex,
-    commitText,
+    selectCandidate,
     setVisible,
     regret,
-    confirmRegret,
     cancelRegret,
-    injectAndHide,
   ])
 }

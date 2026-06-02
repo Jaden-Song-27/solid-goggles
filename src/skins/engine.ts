@@ -241,18 +241,23 @@ export function applySkin(container: HTMLElement, skin: SkinConfig): () => void 
 
 /**
  * Crossfade between two skins on a container element.
- * Applies the new skin after a brief fade-out / fade-in cycle.
+ * Applies the new skin after a fade-out transition, then fades back in.
+ * Uses the transitionend event instead of hardcoded timeouts for reliability.
  */
 export function crossfadeSkin(
   container: HTMLElement,
   cleanupRef: { current: (() => void) | null },
   newSkin: SkinConfig,
 ): void {
+  const duration = newSkin.animation.duration || 150
+
   // Fade out
-  container.style.transition = 'opacity 150ms ease-out'
+  container.style.transition = `opacity ${duration}ms ease-out`
   container.style.opacity = '0'
 
-  setTimeout(() => {
+  function onFadeOut() {
+    container.removeEventListener('transitionend', onFadeOut)
+
     // Switch skin while invisible
     if (cleanupRef.current) {
       cleanupRef.current()
@@ -260,13 +265,32 @@ export function crossfadeSkin(
     cleanupRef.current = applySkin(container, newSkin)
 
     // Fade in
+    container.style.transition = `opacity ${duration}ms ease-out`
+
+    function onFadeIn() {
+      container.removeEventListener('transitionend', onFadeIn)
+      container.style.transition = ''
+    }
+
+    container.addEventListener('transitionend', onFadeIn, { once: false })
+
     requestAnimationFrame(() => {
       container.style.opacity = '1'
+      // Fallback: clear transition after 2x duration if transitionend never fires
       setTimeout(() => {
+        container.removeEventListener('transitionend', onFadeIn)
         container.style.transition = ''
-      }, 150)
+      }, duration * 2 + 50)
     })
-  }, 150)
+  }
+
+  container.addEventListener('transitionend', onFadeOut, { once: false })
+  // Fallback: if transitionend never fires (e.g., browser with reduced motion),
+  // force the swap after 2x duration
+  setTimeout(() => {
+    container.removeEventListener('transitionend', onFadeOut)
+    onFadeOut()
+  }, duration * 2 + 50)
 }
 
 /**

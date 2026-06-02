@@ -8,3 +8,6 @@ Thumbs.db
 *.local
 .env
 .env.*
+scripts/generate-*.js
+scripts/expand-dict.js
+test-bare/

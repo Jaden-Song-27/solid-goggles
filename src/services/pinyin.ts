@@ -3,6 +3,7 @@ import { PINYIN_SYLLABLES } from './pinyin-syllables'
 import { PINYIN_DICT } from './pinyin-dict'
 import { useAppStore } from '../store'
 import { isCommandTrigger, executeCommand } from './commands'
+import { safeEvaluate, isMathExpression } from './safe-math'
 
 // ---- User Frequency Cache ----
 
@@ -12,6 +13,10 @@ let _frequencyLoaded = false
 async function loadFrequency(): Promise<void> {
   if (_frequencyLoaded) return
   _frequencyLoaded = true
+  await refreshFrequencyInternal()
+}
+
+async function refreshFrequencyInternal(): Promise<void> {
   if (window.imeAPI) {
     try {
       const raw = await window.imeAPI.getWordFrequency()
@@ -20,6 +25,11 @@ async function loadFrequency(): Promise<void> {
       _userFrequency = {}
     }
   }
+}
+
+/** Reload frequency data from disk (call after committing text to keep data fresh). */
+export function refreshFrequency(): void {
+  refreshFrequencyInternal()
 }
 
 function getUserFreqBoost(text: string): number {
@@ -103,15 +113,11 @@ export function segmentPinyin(input: string): string[][] {
         backtrack(pos + len, [...path, candidate])
       }
     }
-
-    // If no syllable matched at this position, try single char (may be acronym)
-    if (path.length === 0 || results.length === 0) {
-      // Fail-safe: treat each char as acronym input
-      // This handles cases like "nh" for "ni hao"
-    }
   }
 
   backtrack(0, [])
+  // If no valid segmentation found (e.g., pure acronym input like "nh"),
+  // return empty so getCandidates falls back to acronym expansion.
   return results
 }
 
@@ -200,7 +206,7 @@ function getMathCandidate(input: string): Candidate | null {
   // Check for math expression pattern
   if (!isMathExpression(input)) return null
 
-  const result = evaluateMath(input)
+  const result = safeEvaluate(input)
   if (result === null) return null
 
   return {
@@ -212,7 +218,8 @@ function getMathCandidate(input: string): Candidate | null {
 
 /**
  * Combine character candidates from multiple syllables into word candidates.
- * "ni" + "hao" → cross product of ni-chars × hao-chars
+ * "ni" + "hao" + "ma" → cross product of ni-chars × hao-chars × ma-chars
+ * Supports up to 6 syllables efficiently.
  */
 function combineCandidates(syllables: string[]): Candidate[] {
   // Get character lists for each syllable
@@ -236,27 +243,41 @@ function combineCandidates(syllables: string[]): Candidate[] {
     })
   }
 
-  // For multi-syllable: generate word combinations
+  // For multi-syllable: generate full word combinations using iterative combination
   const words: Candidate[] = []
-  const [first, ...rest] = charLists
-  const topFirst = first.slice(0, 4)
 
-  for (const ch1 of topFirst) {
-    for (const ch2 of rest[0]?.slice(0, 4) || ['']) {
-      const word = ch1 + (ch2 || '')
-      if (word.length >= 2) {
-        const boost = getUserFreqBoost(word)
-        words.push({
-          id: `c-${words.length}`,
-          text: word,
-          frequency: 100 + boost - words.length * 2,
-        })
+  // Take top characters from each syllable (top 4 for first, top 3 for others
+  // to avoid combinatorial explosion with 3+ syllables)
+  const trimmedLists = charLists.map((chars, idx) =>
+    idx === 0 ? chars.slice(0, 4) : chars.slice(0, 3)
+  )
+
+  // Iterative combination: start with first syllable chars, then combine with each subsequent
+  let combos: string[] = trimmedLists[0]
+  for (let si = 1; si < trimmedLists.length; si++) {
+    const next: string[] = []
+    for (const prefix of combos.slice(0, 20)) {
+      for (const ch of trimmedLists[si]) {
+        next.push(prefix + ch)
       }
+    }
+    combos = next.slice(0, 50)
+  }
+
+  for (const word of combos) {
+    if (word.length >= 2) {
+      const boost = getUserFreqBoost(word)
+      words.push({
+        id: `c-${words.length}`,
+        text: word,
+        frequency: 100 + boost - words.length * 2,
+      })
     }
   }
 
   // Add remaining first-syllable chars as single-char candidates
-  for (const ch of first.slice(4)) {
+  const firstList = charLists[0]
+  for (const ch of firstList.slice(4)) {
     words.push({
       id: `c-${words.length}`,
       text: ch,
@@ -278,24 +299,13 @@ export function isCommandMode(input: string): boolean {
 }
 
 /**
- * Check if input looks like a math expression
+ * Check if input looks like a math expression.
+ * Re-exported from safe-math for backward compatibility.
  */
-export function isMathExpression(input: string): boolean {
-  const cleaned = input.trim()
-  return /^[\d\s+\-*/().%^]+$/.test(cleaned) && /\d/.test(cleaned)
-}
+export { isMathExpression } from './safe-math'
 
 /**
- * Safely evaluate a math expression
+ * Safely evaluate a math expression.
+ * Re-exported from safe-math for backward compatibility.
  */
-export function evaluateMath(expr: string): number | null {
-  try {
-    const sanitized = expr.replace(/\s+/g, '')
-    if (!/^[\d+\-*/().%^]+$/.test(sanitized)) return null
-    const result = new Function(`return (${sanitized})`)()
-    if (typeof result === 'number' && isFinite(result)) return result
-    return null
-  } catch {
-    return null
-  }
-}
+export { safeEvaluate as evaluateMath } from './safe-math'

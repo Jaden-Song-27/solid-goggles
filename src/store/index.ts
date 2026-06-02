@@ -9,7 +9,7 @@ import type {
   AppPage,
   QuickCommand,
 } from '../types'
-import { recordSelection } from '../services/pinyin'
+import { recordSelection, refreshFrequency } from '../services/pinyin'
 
 interface AppStore extends AppState {
   // Page navigation
@@ -48,11 +48,17 @@ interface AppStore extends AppState {
   removeCommand: (id: string) => void
   toggleCommand: (id: string) => void
 
+  // Shared candidate selection (keyboard + click)
+  selectCandidate: (candidate: Candidate) => Promise<void>
+
   // Settings
   updateSettings: (settings: Partial<AppSettings>) => void
   loadSettings: () => Promise<void>
   saveSettings: () => Promise<void>
 }
+
+const FADE_OUT_MS = 100
+const INJECT_DELAY_MS = 30
 
 const initialInputState: InputState = {
   composing: '',
@@ -98,19 +104,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ),
     })),
 
-  addSkin: (skin) =>
+  addSkin: (skin) => {
+    window.imeAPI?.refreshTray()
     set((state) => ({
       skins: [...state.skins, skin],
-    })),
+    }))
+  },
 
-  removeSkin: (skinId) =>
+  removeSkin: (skinId) => {
+    window.imeAPI?.refreshTray()
     set((state) => ({
       skins: state.skins.filter((s) => s.id !== skinId),
       activeSkinId:
         state.activeSkinId === skinId
           ? state.skins[0]?.id ?? 'ghost'
           : state.activeSkinId,
-    })),
+    }))
+  },
 
   setComposing: (composing) =>
     set((state) => ({ inputState: { ...state.inputState, composing } })),
@@ -239,6 +249,69 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     })),
 
+  /**
+   * Unified candidate selection: commit, animate fade-out, hide, inject text.
+   * Used by both keyboard handler (useKeyboard) and click handler (App.tsx).
+   */
+  selectCandidate: async (candidate: Candidate) => {
+    const state = get()
+    const isRegret = state.inputState.isRegretMode
+
+    // Commit to history
+    if (isRegret) {
+      state.confirmRegret(candidate)
+    } else {
+      state.commitText(candidate)
+    }
+
+    // Resolve /clip command placeholder: fetch actual clipboard content
+    let resolvedText = candidate.text
+    if (state.inputState.composing.startsWith('/clip') && candidate.text === '读取剪贴板中...') {
+      if (window.imeAPI) {
+        try {
+          const clipText = await window.imeAPI.readClipboard()
+          resolvedText = clipText || '(剪贴板为空)'
+        } catch {
+          resolvedText = '(剪贴板读取失败)'
+        }
+      }
+    }
+
+    // Apply fade-out CSS animation
+    const el = document.querySelector('.ime-overlay')
+    if (el) {
+      el.classList.add('ime-fading-out')
+    }
+
+    // Wait for fade-out animation to complete
+    await new Promise((resolve) => setTimeout(resolve, FADE_OUT_MS))
+
+    // Hide overlay
+    set((s) => ({
+      inputState: {
+        ...s.inputState,
+        isVisible: false,
+        composing: '',
+        candidates: [],
+        highlightedIndex: 0,
+        isRegretMode: false,
+        context: '',
+      },
+    }))
+
+    // Brief delay to ensure window is visually empty before text injection
+    await new Promise((resolve) => setTimeout(resolve, INJECT_DELAY_MS))
+
+    // Inject text into the active application
+    if (window.imeAPI) {
+      try {
+        await window.imeAPI.injectText(resolvedText)
+      } catch {
+        console.warn('[SmartIME] Text injection failed, text may be in clipboard')
+      }
+    }
+  },
+
   setContext: (context) =>
     set((state) => ({ inputState: { ...state.inputState, context } })),
 
@@ -265,6 +338,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     recordSelection(candidate.text, candidate.text.length === 1)
+    refreshFrequency()
 
     set((s) => ({
       inputState: {
@@ -360,6 +434,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     recordSelection(candidate.text, candidate.text.length === 1)
+    refreshFrequency()
 
     _regrettingEntry = null
 

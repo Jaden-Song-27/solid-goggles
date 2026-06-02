@@ -11,11 +11,14 @@ import { useAppStore } from '../store'
  *
  * Any keystroke resets the timer.
  * When autoHideDelay is 0, auto-hide is disabled.
+ *
+ * @param overlayRef - React ref to the IME overlay DOM element.
+ *   Accepts a RefObject from useRef or a callback for direct element access.
  */
 const BREATHING_ADVANCE = 800 // Start warning 0.8s before hide
 const FADE_OUT_DURATION = 100
 
-export function useAutoHide() {
+export function useAutoHide(overlayRef?: React.RefObject<HTMLDivElement | null>) {
   const isVisible = useAppStore((s) => s.inputState.isVisible)
   const composing = useAppStore((s) => s.inputState.composing)
   const autoHideDelay = useAppStore((s) => s.settings.autoHideDelay)
@@ -24,20 +27,19 @@ export function useAutoHide() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const breathingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const overlayRef = useRef<Element | null>(null)
+
+  /** Get the overlay element via the provided ref, falling back to querySelector. */
+  function getOverlayEl(): HTMLElement | null {
+    if (overlayRef?.current) return overlayRef.current
+    // Fallback for cases where ref hasn't been wired up yet
+    return document.querySelector('.ime-overlay') as HTMLElement | null
+  }
 
   useEffect(() => {
-    // Clean up state when overlay is hidden
     if (!isVisible) {
       removeBreathing()
       removeFadeOut()
-      overlayRef.current = null
       return
-    }
-
-    // Cache overlay element
-    if (!overlayRef.current) {
-      overlayRef.current = document.querySelector('.ime-overlay')
     }
 
     // Clear all timers when user is actively typing
@@ -57,7 +59,7 @@ export function useAutoHide() {
       if (breathingStart > 0) {
         breathingRef.current = setTimeout(() => {
           requestAnimationFrame(() => {
-            const el = document.querySelector('.ime-overlay')
+            const el = getOverlayEl()
             if (el) {
               el.classList.add('ime-breathing')
             }
@@ -68,7 +70,7 @@ export function useAutoHide() {
       // Hide at configured delay
       timerRef.current = setTimeout(() => {
         requestAnimationFrame(() => {
-          const el = document.querySelector('.ime-overlay')
+          const el = getOverlayEl()
           if (el) {
             el.classList.add('ime-fading-out')
           }
@@ -94,12 +96,12 @@ export function useAutoHide() {
   }
 
   function removeBreathing() {
-    const el = document.querySelector('.ime-overlay')
+    const el = getOverlayEl()
     if (el) el.classList.remove('ime-breathing')
   }
 
   function removeFadeOut() {
-    const el = document.querySelector('.ime-overlay')
+    const el = getOverlayEl()
     if (el) el.classList.remove('ime-fading-out')
   }
 }

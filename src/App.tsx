@@ -24,7 +24,7 @@ export default function App() {
 
   useImeBridge()
   useSkin(containerRef)
-  useAutoHide()
+  useAutoHide(overlayRef)
   useKeyboard()
 
   const currentPage = useAppStore((s) => s.currentPage)
@@ -195,26 +195,48 @@ export default function App() {
                 <span
                   key={c.id}
                   className={`ime-candidate ${i === highlightedIndex ? 'selected' : ''}`}
-                  onClick={async () => {
-                    const store = useAppStore.getState()
-                    if (store.inputState.isRegretMode) {
-                      store.confirmRegret(c)
-                    } else {
-                      store.commitText(c)
-                    }
-                    // Apply fade-out CSS animation (100ms)
-                    overlayRef.current?.classList.add('ime-fading-out')
-                    await new Promise((r) => setTimeout(r, 100))
-                    store.setVisible(false)
-                    if (window.imeAPI) {
-                      window.imeAPI.injectText(c.text)
-                    }
+                  onClick={() => {
+                    useAppStore.getState().selectCandidate(c)
                   }}
                 >
                   <span className="ime-candidate-index">{i + 1}</span>
                   {c.text}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {candidates.length > 0 && (
+            <div className="ime-actions">
+              <button
+                className="ime-action-btn ime-action-confirm"
+                onClick={() => {
+                  const store = useAppStore.getState()
+                  const c = store.inputState.candidates[store.inputState.highlightedIndex]
+                  if (!c) return
+                  // If it's a hint, append space. Otherwise select.
+                  if (store.inputState.composing.startsWith('/') && c.text.includes('—')) {
+                    useAppStore.getState().setComposing(store.inputState.composing + ' ')
+                  } else {
+                    store.selectCandidate(c)
+                  }
+                }}
+                title="确认 (Space)"
+              >
+                ↵
+              </button>
+              <button
+                className="ime-action-btn ime-action-close"
+                onClick={() => {
+                  useAppStore.getState().setComposing('')
+                  useAppStore.getState().setCandidates([])
+                  useAppStore.getState().setVisible(false)
+                }}
+                title="关闭 (Esc)"
+              >
+                ✕
+              </button>
             </div>
           )}
 

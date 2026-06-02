@@ -4,6 +4,7 @@ import { terminalSkin } from './terminal'
 import { frostedSkin } from './frosted'
 import { inkSkin } from './ink'
 import { minimalSkin } from './minimal'
+import { glassSkins } from './glass'
 
 /** All built-in skins in display order */
 export const builtInSkins: SkinConfig[] = [
@@ -12,6 +13,7 @@ export const builtInSkins: SkinConfig[] = [
   frostedSkin,
   inkSkin,
   minimalSkin,
+  ...glassSkins,
 ]
 
 /** Get a built-in skin by ID */
@@ -20,4 +22,4 @@ export function getBuiltInSkin(id: string): SkinConfig | undefined {
 }
 
 export { ghostSkin, terminalSkin, frostedSkin, inkSkin, minimalSkin }
-export { skinToCSSVars, generateSkinCSS, applySkin } from './engine'
+export { skinToCSSVars, generateSkinCSS, applySkin, crossfadeSkin } from './engine'

@@ -24,7 +24,7 @@ export function createMainWindow(): BrowserWindow {
     resizable: false,
     show: false,
     webPreferences: {
-      preload: join(DIST_ELECTRON, 'preload.js'),
+      preload: join(DIST_ELECTRON, 'preload.js'), // CJS preload for sandbox compatibility
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -110,8 +110,10 @@ export function toggleMainWindow(): void {
   if (!mainWindow) return
   if (mainWindow.isVisible()) {
     mainWindow.hide()
+    mainWindow?.webContents.send('ime:toggle-input')
   } else {
     showMainWindow()
+    mainWindow.webContents.send('ime:toggle-input')
   }
 }
 
@@ -125,6 +127,36 @@ export function toggleMainWindow(): void {
  *   Linux: AT-SPI / D-Bus
  */
 export function getCursorContext(): string {
-  // Placeholder — real implementation requires platform accessibility APIs
-  return ''
+  if (process.platform !== 'win32') return ''
+
+  try {
+    const { execSync } = require('child_process')
+    // PowerShell script using UIA to get text before caret in focused element
+    const script = [
+      'Add-Type -AssemblyName UIAutomationClient',
+      'Add-Type -AssemblyName UIAutomationTypes',
+      '$elem = [System.Windows.Automation.AutomationElement]::FocusedElement',
+      'if (-not $elem) { exit 0 }',
+      'try {',
+      '  $tp = $elem.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)',
+      '  if (-not $tp) { exit 0 }',
+      '  $sel = $tp.GetSelection()',
+      '  if (-not $sel -or $sel.Length -eq 0) { exit 0 }',
+      '  $range = $sel[0].Clone()',
+      '  $range.MoveEndpointByUnit([System.Windows.Automation.TextPatternRangeEndpoint]::Start, [System.Windows.Automation.TextUnit]::Character, -30) | Out-Null',
+      '  $text = $range.GetText(-1)',
+      '  if ($text) { Write-Output $text }',
+      '} catch { exit 0 }',
+    ].join('; ')
+
+    // Use Base64-encoded command to avoid double-quote escaping issues
+    const encoded = Buffer.from(script, 'utf-16le').toString('base64')
+    const result = execSync(
+      `powershell -NoProfile -EncodedCommand ${encoded}`,
+      { timeout: 500, encoding: 'utf-8' },
+    )
+    return result.trim().slice(-30)
+  } catch {
+    return ''
+  }
 }

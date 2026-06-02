@@ -10,6 +10,9 @@ files:
   - dist-electron
   - dist
 
+asarUnpack:
+  - "node_modules/@koromix/**"
+
 win:
   target:
     - target: nsis

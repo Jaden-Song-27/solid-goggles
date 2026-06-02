@@ -1,6 +1,7 @@
 import type { Candidate } from '../types'
 import { translateWord, translateSentence } from './translator'
 import { useAppStore } from '../store'
+import { safeEvaluate } from './safe-math'
 
 // ---- Command Definition ----
 
@@ -235,17 +236,11 @@ function executeCommandWithArg(trigger: string, arg: string): Candidate[] {
       return candidates
     }
     case '/calc': {
-      // Math evaluation is handled by the general math path in pinyin.ts
-      // Here we just forward to the math evaluator
-      try {
-        const sanitized = arg.replace(/\s+/g, '')
-        if (/^[\d+\-*/().%^]+$/.test(sanitized)) {
-          const result = new Function(`return (${sanitized})`)()
-          if (typeof result === 'number' && isFinite(result)) {
-            return [{ id: 'calc-result', text: String(result), frequency: 1000 }]
-          }
-        }
-      } catch { /* ignore */ }
+      // Math evaluation using safe recursive descent parser
+      const result = safeEvaluate(arg)
+      if (result !== null) {
+        return [{ id: 'calc-result', text: String(result), frequency: 1000 }]
+      }
       return [{ id: 'calc-error', text: '无效的数学表达式', frequency: 500 }]
     }
     case '/clip':

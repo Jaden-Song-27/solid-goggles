@@ -47,6 +47,9 @@ export interface ImeAPI {
   // Blur / hide events from main process
   onBlur: (callback: () => void) => () => void
   onHideRequest: (callback: () => void) => () => void
+
+  // Tray refresh
+  refreshTray: () => void
 }
 
 const api: ImeAPI = {
@@ -160,6 +163,10 @@ const api: ImeAPI = {
     const handler = () => callback()
     ipcRenderer.on('ime:hide-request', handler)
     return () => ipcRenderer.removeListener('ime:hide-request', handler)
+  },
+
+  refreshTray() {
+    ipcRenderer.send('tray:refresh')
   },
 }
 

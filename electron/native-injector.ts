@@ -5,9 +5,40 @@ const isWindows = process.platform === 'win32'
 const isMacOS = process.platform === 'darwin'
 const isLinux = process.platform === 'linux'
 
+/**
+ * Escape text for Wscript.Shell.SendKeys.
+ * SendKeys interprets { } ( ) + ^ % ~ as special characters.
+ */
+function escapeForSendKeys(text: string): string {
+  return text
+    .replace(/\{/g, '{{}')
+    .replace(/\}/g, '{}}')
+    .replace(/\(/g, '{(}')
+    .replace(/\)/g, '{)}')
+    .replace(/\+/g, '{+}')
+    .replace(/\^/g, '{^}')
+    .replace(/%/g, '{%}')
+    .replace(/~/g, '{~}')
+}
+
 // ---- Win32: SendInput via koffi ----
-let koffi: any = null
-let SendInput: any = null
+
+/** Type-safe koffi FFI references */
+interface KoffiStructDescriptor {
+  /* opaque — value returned by koffi.struct() */
+}
+interface KoffiInstance {
+  struct(name: string, fields: Record<string, string | KoffiStructDescriptor>): KoffiStructDescriptor
+  load(lib: string): { func(signature: string): unknown }
+  sizeOf(obj: unknown): number
+}
+
+interface SendInputFn {
+  (cInputs: number, pInputs: unknown, cbSize: number): number
+}
+
+let koffi: KoffiInstance | null = null
+let SendInput: SendInputFn | null = null
 
 interface KEYBDINPUT {
   wVk: number
@@ -22,12 +53,14 @@ interface INPUT_STRUCT {
   ki: KEYBDINPUT
 }
 
-function loadWin32() {
+function loadWin32(): boolean {
   try {
-    koffi = require('koffi')
+    koffi = require('koffi') as KoffiInstance
 
-    // Define INPUT struct
-    const INPUT = koffi.struct('INPUT', {
+    // Register INPUT struct with koffi — required for FFI marshalling.
+    // Without this, koffi cannot translate JS objects to the C struct
+    // expected by SendInput's INPUT* parameter.
+    koffi.struct('INPUT', {
       type: 'uint32',
       ki: koffi.struct('KEYBDINPUT', {
         wVk: 'uint16',
@@ -41,10 +74,12 @@ function loadWin32() {
     // Bind SendInput from user32.dll
     SendInput = koffi
       .load('user32.dll')
-      .func('uint32 SendInput(uint32 cInputs, INPUT* pInputs, int cbSize)')
+      .func('uint32 SendInput(uint32 cInputs, INPUT* pInputs, int cbSize)') as SendInputFn
 
     return true
   } catch {
+    koffi = null
+    SendInput = null
     return false
   }
 }
@@ -63,6 +98,7 @@ const VK_DELETE = 0x2E
 function injectWin32(text: string): boolean {
   if (!koffi || !SendInput) return false
 
+  const inputSize = koffi.sizeOf({ type: 0, ki: { wVk: 0, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } })
   const chars = [...text]
   const inputs: INPUT_STRUCT[] = []
 
@@ -96,7 +132,7 @@ function injectWin32(text: string): boolean {
   const BATCH = 20
   for (let i = 0; i < inputs.length; i += BATCH) {
     const batch = inputs.slice(i, i + BATCH)
-    const result = SendInput(batch.length, batch, koffi.sizeOf(batch[0]))
+    const result = SendInput(batch.length, batch, inputSize)
     if (result === 0) return false
   }
 
@@ -143,19 +179,8 @@ function injectLinux(text: string): boolean {
 function sendVKeyWin32(vkCode: number, count: number = 1): boolean {
   if (!koffi || !SendInput) return false
 
-  // Use the koffi struct factory from loadWin32
-  const INPUT = koffi.struct('INPUT', {
-    type: 'uint32',
-    ki: koffi.struct('KEYBDINPUT', {
-      wVk: 'uint16',
-      wScan: 'uint16',
-      dwFlags: 'uint32',
-      time: 'uint32',
-      dwExtraInfo: 'uint64',
-    }),
-  })
-
-  const inputs: any[] = []
+  const inputSize = koffi.sizeOf({ type: 0, ki: { wVk: 0, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } })
+  const inputs: INPUT_STRUCT[] = []
   for (let i = 0; i < count; i++) {
     inputs.push({ type: INPUT_KEYBOARD, ki: { wVk: vkCode, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } })
     inputs.push({ type: INPUT_KEYBOARD, ki: { wVk: vkCode, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } })
@@ -163,7 +188,7 @@ function sendVKeyWin32(vkCode: number, count: number = 1): boolean {
 
   for (let i = 0; i < inputs.length; i += 20) {
     const batch = inputs.slice(i, i + 20)
-    SendInput(batch.length, batch, koffi.sizeOf(inputs[0]))
+    SendInput(batch.length, batch, inputSize)
   }
 
   return true
@@ -176,21 +201,15 @@ function sendVKeyWin32(vkCode: number, count: number = 1): boolean {
 function sendCtrlZWin32(): boolean {
   if (!koffi || !SendInput) return false
 
-  const INPUT = koffi.struct('INPUT', {
-    type: 'uint32',
-    ki: koffi.struct('KEYBDINPUT', {
-      wVk: 'uint16', wScan: 'uint16', dwFlags: 'uint32', time: 'uint32', dwExtraInfo: 'uint64',
-    }),
-  })
-
-  const inputs: any[] = [
+  const inputSize = koffi.sizeOf({ type: 0, ki: { wVk: 0, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } })
+  const inputs: INPUT_STRUCT[] = [
     { type: INPUT_KEYBOARD, ki: { wVk: VK_CONTROL, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } },
     { type: INPUT_KEYBOARD, ki: { wVk: VK_Z, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 } },
     { type: INPUT_KEYBOARD, ki: { wVk: VK_Z, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } },
     { type: INPUT_KEYBOARD, ki: { wVk: VK_CONTROL, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } },
   ]
 
-  SendInput(inputs.length, inputs, koffi.sizeOf(inputs[0]))
+  SendInput(inputs.length, inputs, inputSize)
   return true
 }
 
@@ -206,7 +225,7 @@ export function injectText(text: string): boolean {
     if (win32Loaded === null) win32Loaded = loadWin32()
     if (win32Loaded) return injectWin32(text)
     try {
-      const escaped = text.replace(/'/g, "''")
+      const escaped = escapeForSendKeys(text).replace(/'/g, "''")
       execSync(
         `powershell -command "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('${escaped}')"`,
         { timeout: 2000 },

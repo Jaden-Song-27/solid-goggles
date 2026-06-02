@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useAppStore } from '../store'
-import { applySkin, skinToCSSVars, crossfadeSkin, validateSkinConfig } from '../skins/engine'
+import { applySkin, skinToCSSVars, validateSkinConfig } from '../skins/engine'
 import { builtInSkins } from '../skins'
 import type { SkinConfig, Candidate } from '../types'
 

@@ -72,6 +72,50 @@ input, textarea, [data-selectable] {
   to   { opacity: 0; }
 }
 
+/* Action buttons (Space / Close) */
+.ime-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.ime-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+
+.ime-action-confirm {
+  background: var(--ime-candidate-active-bg, #6C5CE7);
+  color: var(--ime-candidate-active-color, #fff);
+  font-weight: 700;
+}
+
+.ime-action-confirm:hover {
+  filter: brightness(1.2);
+  transform: scale(1.05);
+}
+
+.ime-action-close {
+  background: transparent;
+  color: var(--ime-pinyin-color, #fff);
+  opacity: 0.4;
+}
+
+.ime-action-close:hover {
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* Skin debug badge */
 .ime-skin-badge {
   position: absolute;
