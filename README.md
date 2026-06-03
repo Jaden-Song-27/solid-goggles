@@ -3,8 +3,12 @@
 </p>
 
 <h1 align="center">SmartIME</h1>
-<p align="center"><strong>不打扰你的效率输入法</strong></p>
-<p align="center">打字 · 计算 · 翻译 — 一个面板搞定，无广告，无追踪</p>
+<p align="center"><strong>An Intelligent Desktop IME — Designed as a Lightweight Agent Pipeline</strong></p>
+<p align="center">Type · Calculate · Translate — one panel, zero ads, complete privacy</p>
+
+<p align="center">
+  <sub>📹 <a href="#demo">查看演示</a> · 📋 <a href="docs/competitive-analysis.md">竞品分析</a> · 🗺️ <a href="docs/roadmap.md">产品路线图</a></sub>
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.2.0-purple">
