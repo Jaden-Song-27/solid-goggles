@@ -57,7 +57,7 @@ interface AppStore extends AppState {
   saveSettings: () => Promise<void>
 }
 
-const FOCUS_WAIT_MS = 80 // Time for target app to regain focus after hiding
+const FOCUS_WAIT_MS = 200 // Time for target app to regain focus after minimizing
 
 const initialInputState: InputState = {
   composing: '',
@@ -311,7 +311,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     }
 
-    // Hide the overlay FIRST so the target app regains focus
+    // Step 1: Commit to history (already done above)
+    // Step 2: Hide overlay — return focus to original app
     if (window.imeAPI) {
       window.imeAPI.hideWindow()
     }
@@ -327,10 +328,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     }))
 
-    // Wait for target app to regain focus
+    // Step 3: Wait for hide animation + focus transfer
     await new Promise((resolve) => setTimeout(resolve, FOCUS_WAIT_MS))
 
-    // Now inject into the focused app
+    // Step 4: Inject result into original app's cursor position
+    // restoreAndInject handles: AttachThreadInput → SetForegroundWindow → SendInput
     if (window.imeAPI) {
       try {
         await window.imeAPI.injectText(resolvedText)

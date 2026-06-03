@@ -2,6 +2,7 @@ import { app, globalShortcut, screen } from 'electron'
 import { createMainWindow, getMainWindow, showMainWindow } from './window'
 import { createTray, destroyTray } from './tray'
 import { registerIpcHandlers } from './ipc'
+import { saveForegroundWindow } from './native-injector'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -64,15 +65,23 @@ app.on('activate', () => {
 function registerGlobalShortcuts() {
   function onToggle() {
     const win = getMainWindow()
-    if (win) {
-      showMainWindow()
+    if (!win) return
+    if (win.isVisible()) {
+      win.hide()
       win.webContents.send('ime:toggle-input')
+    } else {
+      // Save which app has focus BEFORE we steal it
+      saveForegroundWindow()
+      showMainWindow()
+      setTimeout(() => win.webContents.send('ime:toggle-input'), 30)
     }
   }
 
   // Try multiple shortcuts in order. WPS/WeChat/etc may steal Alt+=,
   // so we fall back to combinations less likely to conflict.
   const shortcuts = [
+    'Alt+Z',
+    'Ctrl+Alt+Z',
     'Alt+Shift+Z',
     'Alt+=',
   ]
@@ -80,10 +89,12 @@ function registerGlobalShortcuts() {
   let registered = false
   for (const key of shortcuts) {
     try {
-      globalShortcut.register(key, onToggle)
-      console.log('[SmartIME] Registered shortcut:', key)
-      registered = true
-      break
+      const ok = globalShortcut.register(key, onToggle)
+      if (ok) {
+        console.log('[SmartIME] Registered shortcut:', key)
+        registered = true
+        break
+      }
     } catch {
       // Try next
     }

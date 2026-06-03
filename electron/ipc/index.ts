@@ -2,7 +2,7 @@ import { ipcMain, dialog, screen, clipboard, app } from 'electron'
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { showMainWindow, hideMainWindow, resizeMainWindow, getCursorContext } from '../window'
-import { injectText, sendBackspace, forwardCtrlZ } from '../native-injector'
+import { sendBackspace, forwardCtrlZ, restoreAndInject } from '../native-injector'
 import { refreshTrayMenu } from '../tray'
 import { initLaunchOnStartup } from '../main'
 
@@ -56,12 +56,13 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  // ---- Text injection (uses native SendInput / CGEvent / xdotool) ----
+  // ---- Text injection pipeline ----
+  // Store already hides the window before calling this.
+  // This handler does: focus restoration → SendInput injection → clipboard fallback.
   ipcMain.handle('ime:inject-text', async (_event, text: string) => {
     try {
-      const success = injectText(text)
+      const success = restoreAndInject(text)
       if (!success) {
-        // Fallback: copy to clipboard
         clipboard.writeText(text)
         console.log(`[SmartIME] Injection fallback: "${text}" copied to clipboard`)
       }

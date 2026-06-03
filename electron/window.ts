@@ -72,6 +72,12 @@ export function getMainWindow(): BrowserWindow | null {
 export function showMainWindow(): void {
   if (!mainWindow) return
 
+  // If already visible, just focus (no repositioning needed)
+  if (mainWindow.isVisible()) {
+    mainWindow.focus()
+    return
+  }
+
   // Position at cursor + 15px below, then show
   const cursorPoint = screen.getCursorScreenPoint()
   const display = screen.getDisplayNearestPoint(cursorPoint)

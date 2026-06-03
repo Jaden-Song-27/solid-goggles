@@ -60,53 +60,28 @@ export default function App() {
     }
   }, [currentPage])
 
-  // Notify main process of visibility changes to control mouse passthrough
+  // Sync window visibility to main process
   useEffect(() => {
     if (!window.imeAPI) return
-    if (isVisible) {
-      window.imeAPI.showWindow()
-    } else {
-      window.imeAPI.hideWindow()
-    }
+    if (!isVisible) window.imeAPI.hideWindow()
+    // Don't showWindow here — main process already did it for shortcut path.
+    // This effect only handles the HIDE path to keep main process in sync.
   }, [isVisible])
 
-  // Fetch pre-cursor context when IME overlay becomes visible
-  useEffect(() => {
-    if (isVisible && window.imeAPI) {
-      window.imeAPI.getPreCursorText().then((ctx) => {
-        if (ctx) {
-          useAppStore.getState().setContext(ctx)
-        }
-      })
-    }
-  }, [isVisible])
-
-  // Web Animations API: popup animation when overlay appears
+  // Lightweight pop-in animation — no JS animation, CSS-only for speed
   useEffect(() => {
     const el = overlayRef.current
-    if (!el) return
-
-    if (isVisible) {
-      el.style.opacity = '0'
-      el.style.transform = 'scale(0.95)'
-
-      requestAnimationFrame(() => {
-        el.animate(
-          [
-            { opacity: 0, transform: 'scale(0.95)' },
-            { opacity: 1, transform: 'scale(1)' },
-          ],
-          {
-            duration: 150,
-            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
-            fill: 'forwards',
-          },
-        ).onfinish = () => {
-          el.style.opacity = ''
-          el.style.transform = ''
-        }
-      })
-    }
+    if (!el || !isVisible) return
+    el.style.opacity = '0'
+    el.style.transform = 'scale(0.97)'
+    requestAnimationFrame(() => {
+      el.style.transition = 'opacity 100ms ease-out, transform 100ms ease-out'
+      el.style.opacity = '1'
+      el.style.transform = 'scale(1)'
+      setTimeout(() => {
+        el.style.transition = ''
+      }, 100)
+    })
   }, [isVisible])
 
   // Drag-drop skin file import

@@ -213,7 +213,102 @@ function sendCtrlZWin32(): boolean {
   return true
 }
 
-// ---- Public API ----
+// ---- Focus Restoration & Injection Pipeline ----
+// Data flow: Hide SmartIME → Restore prev window focus → Inject text → Done
+
+let prevForegroundWindow: number = 0
+let user32Handle: any = null
+
+function ensureUser32() {
+  if (!user32Handle && koffi) {
+    try { user32Handle = koffi.load('user32.dll') }
+    catch { user32Handle = null }
+  }
+}
+
+/** Save the current foreground window handle (call BEFORE showing SmartIME). */
+export function saveForegroundWindow(): void {
+  if (!isWindows) return
+  if (win32Loaded === null) win32Loaded = loadWin32()
+  if (!win32Loaded || !koffi) return
+  ensureUser32()
+  if (!user32Handle) return
+  try {
+    const GetForegroundWindow = user32Handle.func('int GetForegroundWindow()')
+    prevForegroundWindow = GetForegroundWindow()
+    console.log('[SmartIME] Saved foreground window:', prevForegroundWindow)
+  } catch { prevForegroundWindow = 0 }
+}
+
+/**
+ * Full injection pipeline:
+ * 1. Attach thread input to target window (bypass SetForegroundWindow restriction)
+ * 2. Set target window as foreground
+ * 3. Inject text via SendInput
+ * 4. Detach thread input
+ */
+export function restoreAndInject(text: string): boolean {
+  if (!isWindows) return injectText(text)
+  if (!text) return false
+
+  // Load Win32 APIs on first use
+  if (win32Loaded === null) win32Loaded = loadWin32()
+  if (!win32Loaded || !koffi) {
+    return injectText(text) // Fall back to PowerShell
+  }
+
+  ensureUser32()
+  if (!user32Handle) return injectText(text)
+
+  // Bind required Win32 functions
+  let GetForegroundWindow: any, SetForegroundWindow: any, GetWindowThreadProcessId: any, GetCurrentThreadId: any, AttachThreadInput: any
+  try {
+    GetForegroundWindow = user32Handle.func('int GetForegroundWindow()')
+    SetForegroundWindow = user32Handle.func('bool SetForegroundWindow(int hWnd)')
+    GetWindowThreadProcessId = user32Handle.func('uint32 GetWindowThreadProcessId(int hWnd, int* lpdwProcessId)')
+    GetCurrentThreadId = user32Handle.func('uint32 GetCurrentThreadId()')
+    AttachThreadInput = user32Handle.func('bool AttachThreadInput(uint32 idAttach, uint32 idAttachTo, bool fAttach)')
+  } catch {
+    return injectText(text)
+  }
+
+  // Determine target window: saved handle, or current foreground as fallback
+  const targetHwnd = prevForegroundWindow || GetForegroundWindow()
+  if (!targetHwnd) return injectText(text)
+
+  // Attach our thread to the target window's thread
+  // This bypasses the Windows restriction that only the foreground process
+  // can call SetForegroundWindow
+  const targetThreadId = GetWindowThreadProcessId(targetHwnd, null)
+  const ourThreadId = GetCurrentThreadId()
+  AttachThreadInput(ourThreadId, targetThreadId, true)
+
+  // Now bring the target window to the foreground
+  SetForegroundWindow(targetHwnd)
+
+  // Wait for window switch to complete
+  const start = Date.now()
+  while (Date.now() - start < 80) { /* busy-wait */ }
+
+  // Inject the text into the now-focused window
+  const result = injectWin32(text)
+
+  // Detach thread input
+  AttachThreadInput(ourThreadId, targetThreadId, false)
+
+  if (!result) {
+    // PowerShell fallback
+    try {
+      const escaped = escapeForSendKeys(text).replace(/'/g, "''")
+      execSync(
+        `powershell -NoProfile -command "$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('${escaped}')"`,
+        { timeout: 3000 },
+      )
+      return true
+    } catch { return false }
+  }
+  return true
+}
 
 let win32Loaded: boolean | null = null
 
